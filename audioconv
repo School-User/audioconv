@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# audioconv FORMAT FILE|FOLDER... — convert audio (or pull audio out of video) with ffmpeg.
+# Folders are searched recursively; files with no audio stream (cover art, text) are ignored.
+# Output lands next to each source as name.FORMAT; existing files are never overwritten.
+set -uo pipefail
+[[ $# -ge 2 ]] || { echo "usage: audioconv <mp3|wav|flac|ogg|opus|m4a|...> file-or-folder..." >&2; exit 1; }
+fmt=${1#.}; shift
+rc=0
+
+convert() {
+  local f=$1 out="${1%.*}.$fmt"
+  if [[ -e "$out" ]]; then echo "skip (exists): $out" >&2; return; fi
+  if ffmpeg -hide_banner -loglevel error -n -i "$f" -vn "$out"; then echo "$out"
+  else echo "failed: $f" >&2; rc=1; fi
+}
+
+for arg in "$@"; do
+  if [[ -d "$arg" ]]; then
+    # fd 3 so ffmpeg/ffprobe can't eat the file list from stdin
+    while IFS= read -r -d '' -u 3 f; do
+      [[ "${f,,}" == *."${fmt,,}" ]] && continue   # already the target format
+      [[ -n $(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "$f" 2>/dev/null) ]] && convert "$f"
+    done 3< <(find "$arg" -type f -print0 | sort -z)
+  else
+    convert "$arg"
+  fi
+done
+exit $rc
